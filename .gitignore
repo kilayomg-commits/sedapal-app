@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+output/
+fix.py
+fix2.py
