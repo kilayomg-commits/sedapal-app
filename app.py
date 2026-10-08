@@ -70,12 +70,16 @@ with st.sidebar:
         f"**Salida:** `{output_fname}`"
     )
 
+# ─── Session state — archivos fuente (persisten al cambiar de pestaña) ────────
+fuentes_key = f"ss_fuentes_{zona}_{tipo}"
+if fuentes_key not in st.session_state:
+    st.session_state[fuentes_key] = {}   # { nombre_archivo: bytes }
+
 # ─── TABS ─────────────────────────────────────────────────────────────────────
-st.title("ONCH · Automatizador SEDAPAL")
 tab1, tab2, tab3 = st.tabs([
-    "Gestión de Archivos",
-    "Generación",
-    "Conciliación",
+    "📁  Gestión de Archivos",
+    "⚙️  Generación",
+    "📊  Conciliación",
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -102,34 +106,33 @@ with tab1:
         )
         if uploaded:
             for f in uploaded:
-                guardar_archivo(f, zona, tipo, "fuentes")
-            st.success(f"✅ {len(uploaded)} archivo(s) guardado(s)")
-            st.rerun()
+                # Guardar bytes en session_state (persiste entre pestañas)
+                st.session_state[fuentes_key][f.name] = f.read()
+            st.success(f"✅ {len(uploaded)} archivo(s) cargado(s)")
+            # Sin st.rerun() para no borrar el widget
 
     with col_list:
-        archivos = listar_archivos(zona, tipo, "fuentes")
-        if archivos:
+        ss_files = st.session_state[fuentes_key]   # { nombre: bytes }
+        if ss_files:
             df_files = pd.DataFrame([
                 {
-                    "Archivo": a["nombre"],
-                    "CR":      a["cr"],
-                    "Fecha":   a["fecha_archivo"],
-                    "Tamaño":  a["tamano"],
+                    "Archivo": nombre,
+                    "Tamaño":  f"{len(data)/1024:.1f} KB",
                 }
-                for a in archivos
+                for nombre, data in ss_files.items()
             ])
             st.dataframe(df_files, use_container_width=True, hide_index=True)
-            st.caption(f"Total: **{len(archivos)}** archivo(s)")
+            st.caption(f"Total: **{len(ss_files)}** archivo(s) en esta sesión")
 
             # Eliminar archivos
             with st.expander("🗑️ Eliminar archivos"):
                 to_delete = st.multiselect(
                     "Selecciona archivos a eliminar",
-                    options=[a["nombre"] for a in archivos],
+                    options=list(ss_files.keys()),
                 )
                 if st.button("Eliminar seleccionados", disabled=not to_delete):
                     for nombre in to_delete:
-                        eliminar_archivo(zona, tipo, "fuentes", nombre)
+                        st.session_state[fuentes_key].pop(nombre, None)
                     st.success(f"Eliminados: {len(to_delete)}")
                     st.rerun()
         else:
@@ -142,8 +145,8 @@ with tab1:
     col_p1, col_p2 = st.columns(2)
 
     with col_p1:
-        status_plantilla = f"✅ {plantilla_path.name}" if plantilla_path.exists() else "❌ No cargada"
-        st.markdown(f"**Plantilla vacía**\n\n{status_plantilla}")
+        status_plantilla = "✅ Cargada" if plantilla_path.exists() else "❌ No cargada"
+        st.markdown(f"**Plantilla vacía (.xlsm)** — {status_plantilla}")
         p_up = st.file_uploader(
             "Sube la plantilla vacía",
             type=["xlsm"],
@@ -156,8 +159,8 @@ with tab1:
             st.rerun()
 
     with col_p2:
-        status_estilos = f"✅ {estilos_path.name}" if estilos_path.exists() else "❌ No cargado"
-        st.markdown(f"**Referencia/Estilos**\n\n{status_estilos}")
+        status_estilos = "✅ Cargado" if estilos_path.exists() else "❌ No cargado"
+        st.markdown(f"**Archivo de estilos/referencia (.xlsm)** — {status_estilos}")
         e_up = st.file_uploader(
             "Sube el archivo de referencia",
             type=["xlsm"],
@@ -176,9 +179,10 @@ with tab1:
 with tab2:
     st.header(f"⚙️ Generación — {zona} / {tipo} / {MESES[mes_idx]} {anio}")
 
-    archivos_fuente = listar_archivos(zona, tipo, "fuentes")
+    ss_files = st.session_state.get(fuentes_key, {})
+    n_fuentes = len(ss_files)
     can_run = (
-        len(archivos_fuente) > 0
+        n_fuentes > 0
         and plantilla_path.exists()
         and estilos_path.exists()
     )
@@ -190,8 +194,8 @@ with tab2:
         def check(cond, label):
             return f"{'✅' if cond else '❌'} {label}"
 
-        st.write(check(len(archivos_fuente) > 0,
-                       f"Archivos fuente: **{len(archivos_fuente)}** archivo(s)"))
+        st.write(check(n_fuentes > 0,
+                       f"Archivos fuente: **{n_fuentes}** archivo(s)"))
         st.write(check(plantilla_path.exists(),
                        f"Plantilla vacía: `{plantilla_path.name}`"))
         st.write(check(estilos_path.exists(),
@@ -215,13 +219,21 @@ with tab2:
 
     # Ejecución
     if run_btn:
-        source_paths = [a["path"] for a in archivos_fuente]
+        import tempfile as _tempfile
+
+        # Escribir bytes de session_state a /tmp/ para que generar_plantilla pueda leerlos
+        _tmp_dir = Path(_tempfile.mkdtemp())
+        source_paths = []
+        for _nombre, _data in ss_files.items():
+            _p = _tmp_dir / _nombre
+            _p.write_bytes(_data)
+            source_paths.append(str(_p))
 
         log_area    = st.empty()
         progress_bar = st.progress(0.0)
-        all_logs: list[str] = []
+        all_logs = []
 
-        def on_log(msg: str, pct: float):
+        def on_log(msg, pct):
             all_logs.append(msg)
             log_area.code("\n".join(all_logs[-30:]))
             progress_bar.progress(min(pct, 1.0))
