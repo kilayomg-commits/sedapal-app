@@ -405,7 +405,7 @@ with tab3:
 
         styled = (
             df_res.style
-            .applymap(color_dif, subset=["Diferencia"])
+            .map(color_dif, subset=["Diferencia"])
             .format({
                 "E (S/)":        "S/ {:,.2f}",
                 "TA (S/)":       "S/ {:,.2f}",
