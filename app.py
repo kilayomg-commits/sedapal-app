@@ -31,10 +31,15 @@ st.set_page_config(
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Ocultar toolbar nativo de Streamlit para que no tape los tabs */
-    header[data-testid="stHeader"] { display: none; }
-    #MainMenu { display: none; }
-    footer { display: none; }
+    /* Ocultar solo los botones del toolbar, NO el header completo
+       (si se oculta el header con display:none, el botón de expandir la barra lateral desaparece) */
+    #MainMenu { display: none !important; }
+    footer { display: none !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stDeployButton"] { display: none !important; }
+    [data-testid="stStatusWidget"] { display: none !important; }
+    /* Header transparente para que no tape el contenido */
+    header[data-testid="stHeader"] { background: transparent !important; }
 
     .block-container { padding-top: 1rem; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
