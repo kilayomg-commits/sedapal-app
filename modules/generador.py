@@ -125,21 +125,11 @@ def apply_style(dst_cell, style: dict) -> None:
     if "number_format" in style: dst_cell.number_format = style["number_format"]
 
 
-# Colores de respaldo para filas PM03 que no tienen fill en la plantilla de estilos
-_PM03_FALLBACK_FILLS = {
+# Fills fijos para filas PM03 de TA y AH (se aplican siempre en write_row_to_sheet)
+_PM03_FILLS = {
     "TA_PM03": PatternFill(fill_type="solid", fgColor="FFC000"),  # naranja/ámbar
-    "AH_PM03": PatternFill(fill_type="solid", fgColor="92D050"),  # verde claro
+    "AH_PM03": PatternFill(fill_type="solid", fgColor="00B0F0"),  # azul claro
 }
-
-
-def _row_has_fill(row_styles: list) -> bool:
-    """Devuelve True si alguna celda del row_style tiene un fill sólido definido."""
-    for s in row_styles:
-        if "fill" in s:
-            f = s["fill"]
-            if f.fill_type not in (None, "none"):
-                return True
-    return False
 
 
 def load_styles(wb_estilos, cfg: dict) -> dict:
@@ -154,12 +144,6 @@ def load_styles(wb_estilos, cfg: dict) -> dict:
             cell = ws.cell(row=fila, column=col)
             row_styles.append(copy_cell_style(cell))
         styles[nombre] = row_styles
-
-    # Si las filas PM03 de TA/AH no tienen fill en la plantilla, aplicar color de respaldo
-    for key, fallback_fill in _PM03_FALLBACK_FILLS.items():
-        if key in styles and not _row_has_fill(styles[key]):
-            for cell_style in styles[key]:
-                cell_style["fill"] = copy(fallback_fill)
 
     styles["TA_MAT"] = styles["MAT"]
     styles["AH_MAT"] = styles["MAT"]
@@ -425,6 +409,12 @@ def write_row_to_sheet(ws, row_num: int, row_data: dict, styles: dict, num_cols:
         cell.value = val
         if col_style:
             apply_style(cell, col_style)
+
+    # Aplicar fill fijo para filas PM03 de TA y AH (directo, no depende de la plantilla)
+    if row_type in _PM03_FILLS:
+        pm03_fill = _PM03_FILLS[row_type]
+        for col_idx in range(1, num_cols + 1):
+            ws.cell(row=row_num, column=col_idx).fill = copy(pm03_fill)
 
 
 # ─── Función principal ────────────────────────────────────────────────────────
