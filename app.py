@@ -81,14 +81,31 @@ if fuentes_key not in st.session_state:
     st.session_state[fuentes_key] = {}   # { nombre_archivo: bytes }
 
 
-# ─── Fragment: carga y lista de fuentes (se recarga solo sin afectar los tabs) ─
-@st.fragment
-def _seccion_fuentes(zona: str, tipo: str, fuentes_key: str):
+
+# ─── TABS ─────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs([
+    "📁  Gestión de Archivos",
+    "⚙️  Generación",
+    "📊  Conciliación",
+])
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — Gestión de Archivos
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+    st.header(f"📁 Archivos — {zona} / {tipo}")
+
+    # ── Archivos fuente ────────────────────────────────────────────────────────
     st.subheader("📤 Archivos Fuente (.xlsx)")
     st.caption(
         "Sube los archivos de los CR trabajados en el período. "
         "Se guardan en esta sesión y estarán disponibles en todas las pestañas."
     )
+
+    # Versión del uploader — se incrementa al eliminar archivos para resetear el widget
+    _uploader_v_key = f"_uploader_v_{zona}_{tipo}"
+    if _uploader_v_key not in st.session_state:
+        st.session_state[_uploader_v_key] = 0
 
     col_up, col_list = st.columns([1, 2])
 
@@ -97,11 +114,13 @@ def _seccion_fuentes(zona: str, tipo: str, fuentes_key: str):
             "Arrastra o selecciona archivos .xlsx",
             type=["xlsx"],
             accept_multiple_files=True,
-            key=f"fuentes_{zona}_{tipo}",
+            key=f"fuentes_{zona}_{tipo}_{st.session_state[_uploader_v_key]}",
         )
         if uploaded:
             for f in uploaded:
-                st.session_state[fuentes_key][f.name] = f.read()
+                content = f.read()
+                if content:
+                    st.session_state[fuentes_key][f.name] = content
             st.success(f"✅ {len(uploaded)} archivo(s) cargado(s)")
 
     with col_list:
@@ -122,25 +141,11 @@ def _seccion_fuentes(zona: str, tipo: str, fuentes_key: str):
                 if st.button("Eliminar seleccionados", disabled=not to_delete):
                     for nombre in to_delete:
                         st.session_state[fuentes_key].pop(nombre, None)
+                    # Incrementar versión para resetear el widget y no re-cargar archivos eliminados
+                    st.session_state[_uploader_v_key] += 1
                     st.rerun()
         else:
             st.info(f"No hay archivos fuente para {zona}/{tipo}. Sube tus .xlsx arriba.")
-
-# ─── TABS ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
-    "📁  Gestión de Archivos",
-    "⚙️  Generación",
-    "📊  Conciliación",
-])
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Gestión de Archivos
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.header(f"📁 Archivos — {zona} / {tipo}")
-
-    # ── Archivos fuente ────────────────────────────────────────────────────────
-    _seccion_fuentes(zona, tipo, fuentes_key)
 
     st.markdown("---")
 
