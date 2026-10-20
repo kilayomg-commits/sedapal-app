@@ -31,10 +31,22 @@ st.set_page_config(
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+    /* Colapsar el header a altura 0 (sin display:none) para que no ocupe espacio
+       pero sus hijos con posición absoluta (botón de la sidebar) sigan visibles */
+    header[data-testid="stHeader"] {
+        height: 0 !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        background: transparent !important;
+    }
+    /* Ocultar los botones del toolbar que están dentro del header */
     #MainMenu { display: none !important; }
     footer { display: none !important; }
-    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stToolbar"] { visibility: hidden !important; }
     [data-testid="stDeployButton"] { display: none !important; }
+
+    .block-container { padding-top: 1rem; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
     .metric-label { font-size: 0.85rem !important; }
 </style>
