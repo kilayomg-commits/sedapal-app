@@ -287,6 +287,17 @@ def build_cr_rows(
     act_precio  = act_info["precio"]
     prefix      = "P" if tipo.upper() == "POZO" else "CR"
     cr_display  = f"{prefix}-{cr_base}"
+
+    # Descripciones PM03 y ACT adaptadas al tipo (CR o POZO)
+    entity = "POZO" if tipo.upper() == "POZO" else "CR"
+    pm03_descs = {
+        "E":  f"Srv.mtto Preventivo de Equipo de Bombeo en {entity}",
+        "TA": f"Srv.mtto Preventivo de Tableros Electricos en {entity}",
+        "AH": f"Srv.mtto Preventivo de Accesorios Hidraulicos en {entity}",
+    }
+    # La descripción de ACT viene del catálogo; reemplazar "CR" por "POZO" si corresponde
+    act_desc = act_info["desc"].replace("en CR", f"en {entity}").replace(" CR ", f" {entity} ")
+
     first_equipo = True
 
     for eq_data in equipos_data:
@@ -301,10 +312,10 @@ def build_cr_rows(
         e_pm03_sub = (e_sub_mats + act_precio) if first_equipo else e_sub_mats
 
         rows.append(_row(f"E{eq_num}", cr_display, "E", "PM03", None,
-                         PM03_DESCS["E"], 1, e_pm03_sub, e_pm03_sub, fecha_str, "E_PM03"))
+                         pm03_descs["E"], 1, e_pm03_sub, e_pm03_sub, fecha_str, "E_PM03"))
         if first_equipo:
             rows.append(_row(f"E{eq_num}", cr_display, "E", "ACT", act_sap,
-                             act_info["desc"], 1, act_precio, act_precio, fecha_str, "ACT"))
+                             act_desc, 1, act_precio, act_precio, fecha_str, "ACT"))
         for mat in e_mats:
             rows.append(_row(f"E{eq_num}", cr_display, "E", "MAT", mat["sap"],
                              mat["desc"], mat["qty"], mat["precio"], mat["subtotal"],
@@ -317,7 +328,7 @@ def build_cr_rows(
         ]
         ta_sub = sum((m["subtotal"] for m in ta_mats), Decimal("0"))
         rows.append(_row(f"TA{eq_num}", cr_display, "TA", "PM03", None,
-                         PM03_DESCS["TA"], 1, ta_sub, ta_sub, fecha_str, "TA_PM03"))
+                         pm03_descs["TA"], 1, ta_sub, ta_sub, fecha_str, "TA_PM03"))
         for mat in ta_mats:
             rows.append(_row(f"TA{eq_num}", cr_display, "TA", "MAT", mat["sap"],
                              mat["desc"], mat["qty"], mat["precio"], mat["subtotal"],
@@ -330,7 +341,7 @@ def build_cr_rows(
         ]
         ah_sub = sum((m["subtotal"] for m in ah_mats), Decimal("0"))
         rows.append(_row(f"AH{eq_num}", cr_display, "AH", "PM03", None,
-                         PM03_DESCS["AH"], 1, ah_sub, ah_sub, fecha_str, "AH_PM03"))
+                         pm03_descs["AH"], 1, ah_sub, ah_sub, fecha_str, "AH_PM03"))
         for mat in ah_mats:
             rows.append(_row(f"AH{eq_num}", cr_display, "AH", "MAT", mat["sap"],
                              mat["desc"], mat["qty"], mat["precio"], mat["subtotal"],
