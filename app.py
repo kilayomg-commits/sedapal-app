@@ -25,65 +25,69 @@ st.set_page_config(
     page_title="ONCH · Automatizador SEDAPAL",
     page_icon="🔧",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Colapsar el header a altura 0 (sin display:none) para que no ocupe espacio
-       pero sus hijos con posición absoluta (botón de la sidebar) sigan visibles */
-    header[data-testid="stHeader"] {
-        height: 0 !important;
-        min-height: 0 !important;
-        padding: 0 !important;
-        overflow: visible !important;
-        background: transparent !important;
-    }
-    /* Ocultar los botones del toolbar que están dentro del header */
-    #MainMenu { display: none !important; }
+    header[data-testid="stHeader"] { display: none !important; }
     footer { display: none !important; }
-    [data-testid="stToolbar"] { visibility: hidden !important; }
-    [data-testid="stDeployButton"] { display: none !important; }
-
-    .block-container { padding-top: 1rem; }
+    #MainMenu { display: none !important; }
+    .block-container { padding-top: 0.5rem !important; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
     .metric-label { font-size: 0.85rem !important; }
+    /* Barra de parámetros */
+    .param-bar {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 8px;
+        padding: 0.5rem 1rem 0.2rem 1rem;
+        margin-bottom: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── SIDEBAR — Parámetros globales ───────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## 🔧 ONCH · SEDAPAL")
-    st.markdown("---")
-    st.subheader("⚙️ Parámetros")
+# ─── Barra de parámetros (reemplaza la sidebar) ───────────────────────────────
+st.markdown('<div class="param-bar">', unsafe_allow_html=True)
 
-    zona = st.selectbox("Zona / Región", ["NORTE", "CENTRO"], index=0, key="zona")
-    tipo = st.selectbox("Tipo de Entidad", ["CR", "POZO"], index=0, key="tipo")
+col_titulo, col_zona, col_tipo, col_mes, col_anio, col_info = st.columns(
+    [1.4, 1, 0.9, 1.4, 0.75, 2.5]
+)
 
-    st.markdown("---")
-    st.subheader("📅 Período")
+with col_titulo:
+    st.markdown("### 🔧 ONCH · SEDAPAL")
 
+with col_zona:
+    zona = st.selectbox("Zona", ["NORTE", "CENTRO"], index=0)
+
+with col_tipo:
+    tipo = st.selectbox("Tipo", ["CR", "POZO"], index=0)
+
+with col_mes:
     mes_idx = st.selectbox(
         "Mes", options=list(range(12)),
         format_func=lambda i: MESES[i],
         index=datetime.now().month - 1,
     )
+
+with col_anio:
     anio = st.number_input("Año", min_value=2024, max_value=2030,
                            value=datetime.now().year, step=1)
 
-    mes_label   = f"{MESES[mes_idx].upper()}{anio}"
-    output_fname = f"{zona}_{tipo}_{mes_label}.xlsm"
-    output_path  = OUTPUT_DIR / output_fname
-    plantilla_path = get_plantilla_path(zona, tipo)
-    estilos_path   = get_estilos_path(zona, tipo)
+# Variables derivadas (deben calcularse después de los widgets)
+mes_label    = f"{MESES[mes_idx].upper()}{anio}"
+output_fname = f"{zona}_{tipo}_{mes_label}.xlsm"
+output_path  = OUTPUT_DIR / output_fname
+plantilla_path = get_plantilla_path(zona, tipo)
+estilos_path   = get_estilos_path(zona, tipo)
 
-    st.markdown("---")
-    st.info(
-        f"**Período:** {MESES[mes_idx]} {anio}\n\n"
-        f"**Zona:** {zona}  |  **Tipo:** {tipo}\n\n"
-        f"**Salida:** `{output_fname}`"
+with col_info:
+    st.markdown(
+        f"📅 **{MESES[mes_idx]} {anio}** &nbsp;·&nbsp; 📁 `{output_fname}`",
+        help=f"Zona: {zona} | Tipo: {tipo} | Período: {MESES[mes_idx]} {anio}"
     )
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ─── Session state — archivos fuente (persisten al cambiar de pestaña) ────────
 fuentes_key = f"ss_fuentes_{zona}_{tipo}"
