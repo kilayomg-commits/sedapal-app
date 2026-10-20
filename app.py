@@ -241,6 +241,7 @@ with tab2:
         try:
             logs, total_rows = generar_plantilla(
                 zona=zona,
+                tipo=tipo,
                 source_paths=source_paths,
                 plantilla_path=str(plantilla_path),
                 estilos_path=str(estilos_path),

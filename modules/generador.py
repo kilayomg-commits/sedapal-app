@@ -10,7 +10,7 @@ import unicodedata
 from decimal import Decimal
 from datetime import datetime
 from copy import copy
-from typing import Callable, Optional, List, Dict, Tuple
+from typing import Callable, Optional
 from openpyxl import load_workbook
 
 from config import ZONA_CONFIG, PLANTILLA_START_ROW
@@ -39,26 +39,35 @@ def get_act_code(num_equipos: int) -> str:
 
 
 # ─── Parseo del nombre de archivo ─────────────────────────────────────────────
-def parse_filename(fname: str):
-    m_cr = re.search(r"CR-(\d+[A-Za-z]?)", fname)
-    if not m_cr:
+def parse_filename(fname: str, tipo: str = "CR"):
+    """
+    Extrae código (CR-XXX o P-XXX según tipo) y fecha del nombre del archivo.
+    """
+    if tipo.upper() == "POZO":
+        m_code = re.search(r"P-(\d+[A-Za-z]?)", fname, re.IGNORECASE)
+    else:
+        m_code = re.search(r"CR-(\d+[A-Za-z]?)", fname, re.IGNORECASE)
+
+    if not m_code:
         return None, None
-    cr_base = m_cr.group(1)
+    code_base = m_code.group(1)
+
     variant = ""
-    if "500" in fname.upper() and "HP" in fname.upper():
-        variant = "_500HP"
-    elif "200" in fname.upper() and "HP" in fname.upper():
-        variant = "_200HP"
-    cr_code = cr_base + variant
+    if tipo.upper() == "CR":
+        if "500" in fname.upper() and "HP" in fname.upper():
+            variant = "_500HP"
+        elif "200" in fname.upper() and "HP" in fname.upper():
+            variant = "_200HP"
+    code = code_base + variant
 
     m_date = re.search(r"(\d{2})[._](\d{2})[._](\d{4})", fname)
     if not m_date:
-        return cr_code, None
+        return code, None
     try:
         fecha = datetime(int(m_date.group(3)), int(m_date.group(2)), int(m_date.group(1)))
     except Exception:
         fecha = None
-    return cr_code, fecha
+    return code, fecha
 
 
 # ─── Catálogo (MATERIALES + ACTIVIDAD) ────────────────────────────────────────
@@ -134,7 +143,7 @@ def load_styles(wb_estilos, cfg: dict) -> dict:
 
 
 # ─── Parseo del archivo fuente ────────────────────────────────────────────────
-def parse_source_file(filepath: str, cr_code: str, cfg: dict) -> List[dict]:
+def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR") -> list[dict]:
     """
     Lee el archivo fuente y devuelve lista de equipos con sus materiales E/TA/AH.
     """
@@ -146,7 +155,8 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict) -> List[dict]:
     ws = wb.active
 
     cr_base = re.match(r"(\d+[A-Za-z]?)", cr_code).group(1)
-    cr_pattern = re.compile(r"CR[\s\-]*" + re.escape(cr_base) + r"\b", re.IGNORECASE)
+    prefix = "P" if tipo.upper() == "POZO" else "CR"
+    cr_pattern = re.compile(rf"{prefix}[\s\-]*" + re.escape(cr_base) + r"\b", re.IGNORECASE)
 
     # Leer filas de cabecera
     h_headers: dict[int, str] = {}
@@ -190,7 +200,7 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict) -> List[dict]:
             relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo}
 
     if not relevant_cols:
-        print(f"  ADVERTENCIA: Sin columnas para CR-{cr_base} en {os.path.basename(filepath)}")
+        print(f"  ADVERTENCIA: Sin columnas para {prefix}-{cr_base} en {os.path.basename(filepath)}")
         wb.close()
         return []
 
@@ -265,16 +275,18 @@ def resolver_material(mat: dict, catalog: dict, unmapped_log: list, tag: str) ->
 # ─── Construcción de filas ────────────────────────────────────────────────────
 def build_cr_rows(
     cr_base: str, fecha_str: str,
-    equipos_data: List[dict],
+    equipos_data: list[dict],
     catalog: dict,
     unmapped_log: list,
-) -> List[dict]:
+    tipo: str = "CR",
+) -> list[dict]:
     rows = []
     num_equipos = len(equipos_data)
     act_sap     = get_act_code(num_equipos)
     act_info    = catalog.get(act_sap, {"desc": "MP en CR", "precio": Decimal("0")})
     act_precio  = act_info["precio"]
-    cr_display  = f"CR-{cr_base}"
+    prefix      = "P" if tipo.upper() == "POZO" else "CR"
+    cr_display  = f"{prefix}-{cr_base}"
     first_equipo = True
 
     for eq_data in equipos_data:
@@ -282,7 +294,7 @@ def build_cr_rows(
 
         # ── BOMBA (E) ──────────────────────────────────────────────────────────
         e_mats = [
-            resolver_material(m, catalog, unmapped_log, f"CR-{cr_base} E{eq_num}")
+            resolver_material(m, catalog, unmapped_log, f"{prefix}-{cr_base} E{eq_num}")
             for m in eq_data["E"]
         ]
         e_sub_mats = sum((m["subtotal"] for m in e_mats), Decimal("0"))
@@ -300,7 +312,7 @@ def build_cr_rows(
 
         # ── TABLERO (TA) ───────────────────────────────────────────────────────
         ta_mats = [
-            resolver_material(m, catalog, unmapped_log, f"CR-{cr_base} TA{eq_num}")
+            resolver_material(m, catalog, unmapped_log, f"{prefix}-{cr_base} TA{eq_num}")
             for m in eq_data["TA"]
         ]
         ta_sub = sum((m["subtotal"] for m in ta_mats), Decimal("0"))
@@ -313,7 +325,7 @@ def build_cr_rows(
 
         # ── ACCESORIOS (AH) ────────────────────────────────────────────────────
         ah_mats = [
-            resolver_material(m, catalog, unmapped_log, f"CR-{cr_base} AH{eq_num}")
+            resolver_material(m, catalog, unmapped_log, f"{prefix}-{cr_base} AH{eq_num}")
             for m in eq_data["AH"]
         ]
         ah_sub = sum((m["subtotal"] for m in ah_mats), Decimal("0"))
@@ -382,6 +394,7 @@ def generar_plantilla(
     estilos_path: str,
     output_path: str,
     log_callback: Optional[Callable] = None,
+    tipo: str = "CR",
 ) -> tuple[list[str], int]:
     """
     Genera el archivo XLSM de salida a partir de los archivos fuente.
@@ -393,13 +406,15 @@ def generar_plantilla(
         estilos_path:   Ruta al archivo de estilos .xlsm
         output_path:    Ruta destino del archivo generado
         log_callback:   Función opcional (mensaje: str, progreso: float) → None
+        tipo:           "CR" o "POZO"
 
     Returns:
         (logs: list[str], total_rows: int)
     """
     cfg  = ZONA_CONFIG[zona.upper()]
-    logs: list[str] = []
+    logs = []
     n    = len(source_paths)
+    prefix = "P" if tipo.upper() == "POZO" else "CR"
 
     def log(msg: str, pct: float = 0.0):
         logs.append(msg)
@@ -407,7 +422,7 @@ def generar_plantilla(
             log_callback(msg, pct)
         print(msg)
 
-    log(f"▶ Iniciando generación {zona}  ({n} archivos fuente)", 0.0)
+    log(f"▶ Iniciando generación {zona}/{tipo}  ({n} archivos fuente)", 0.0)
 
     # 1. Catálogo y estilos
     log("[1/4] Cargando catálogo y estilos...", 0.05)
@@ -419,22 +434,22 @@ def generar_plantilla(
 
     # 2. Parseo de archivos fuente
     log("[2/4] Parseando archivos fuente...", 0.10)
-    cr_data_list: List[dict] = []
-    unmapped_log: list[str]  = []
+    cr_data_list = []
+    unmapped_log = []
 
     for i, filepath in enumerate(sorted(source_paths)):
         pct = 0.10 + 0.60 * i / max(n, 1)
         fname    = os.path.basename(filepath)
-        cr_code, fecha = parse_filename(fname)
+        cr_code, fecha = parse_filename(fname, tipo=tipo)
 
         if cr_code is None:
-            log(f"  IGNORADO (sin código CR): {fname}", pct)
+            log(f"  IGNORADO (sin código {prefix}): {fname}", pct)
             continue
 
         fecha_str = fecha.strftime("%d/%m/%Y") if fecha else ""
-        log(f"  [{i+1}/{n}] CR-{cr_code} ({fecha_str})", pct)
+        log(f"  [{i+1}/{n}] {prefix}-{cr_code} ({fecha_str})", pct)
 
-        equipos = parse_source_file(filepath, cr_code, cfg)
+        equipos = parse_source_file(filepath, cr_code, cfg, tipo=tipo)
         for eq in equipos:
             log(
                 f"    N°{eq['equipo']}: "
@@ -443,11 +458,11 @@ def generar_plantilla(
             )
 
         if not equipos:
-            log(f"    ⚠ Sin datos para CR-{cr_code}", pct)
+            log(f"    ⚠ Sin datos para {prefix}-{cr_code}", pct)
             continue
 
         base = re.match(r"(\d+[A-Za-z]?)", cr_code).group(1)
-        rows = build_cr_rows(base, fecha_str, equipos, catalog, unmapped_log)
+        rows = build_cr_rows(base, fecha_str, equipos, catalog, unmapped_log, tipo=tipo)
         cr_data_list.append({"cr": cr_code, "rows": rows})
         log(f"    → {len(rows)} filas generadas", pct)
 
@@ -482,7 +497,7 @@ def generar_plantilla(
         log("✓ Todos los materiales mapeados correctamente.", 0.98)
 
     log(
-        f"\n✅ COMPLETADO — {total_filas} filas en {len(cr_data_list)} CRs → {output_path}",
+        f"\n✅ COMPLETADO — {total_filas} filas en {len(cr_data_list)} {prefix}s → {output_path}",
         1.0,
     )
     return logs, total_filas
