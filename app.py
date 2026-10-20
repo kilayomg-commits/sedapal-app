@@ -80,6 +80,52 @@ fuentes_key = f"ss_fuentes_{zona}_{tipo}"
 if fuentes_key not in st.session_state:
     st.session_state[fuentes_key] = {}   # { nombre_archivo: bytes }
 
+
+# ─── Fragment: carga y lista de fuentes (se recarga solo sin afectar los tabs) ─
+@st.fragment
+def _seccion_fuentes(zona: str, tipo: str, fuentes_key: str):
+    st.subheader("📤 Archivos Fuente (.xlsx)")
+    st.caption(
+        "Sube los archivos de los CR trabajados en el período. "
+        "Se guardan en esta sesión y estarán disponibles en todas las pestañas."
+    )
+
+    col_up, col_list = st.columns([1, 2])
+
+    with col_up:
+        uploaded = st.file_uploader(
+            "Arrastra o selecciona archivos .xlsx",
+            type=["xlsx"],
+            accept_multiple_files=True,
+            key=f"fuentes_{zona}_{tipo}",
+        )
+        if uploaded:
+            for f in uploaded:
+                st.session_state[fuentes_key][f.name] = f.read()
+            st.success(f"✅ {len(uploaded)} archivo(s) cargado(s)")
+
+    with col_list:
+        ss_files = st.session_state[fuentes_key]
+        if ss_files:
+            df_files = pd.DataFrame([
+                {"Archivo": nombre, "Tamaño": f"{len(data)/1024:.1f} KB"}
+                for nombre, data in ss_files.items()
+            ])
+            st.dataframe(df_files, use_container_width=True, hide_index=True)
+            st.caption(f"Total: **{len(ss_files)}** archivo(s) en esta sesión")
+
+            with st.expander("🗑️ Eliminar archivos"):
+                to_delete = st.multiselect(
+                    "Selecciona archivos a eliminar",
+                    options=list(ss_files.keys()),
+                )
+                if st.button("Eliminar seleccionados", disabled=not to_delete):
+                    for nombre in to_delete:
+                        st.session_state[fuentes_key].pop(nombre, None)
+                    st.rerun()
+        else:
+            st.info(f"No hay archivos fuente para {zona}/{tipo}. Sube tus .xlsx arriba.")
+
 # ─── TABS ─────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs([
     "📁  Gestión de Archivos",
@@ -94,54 +140,7 @@ with tab1:
     st.header(f"📁 Archivos — {zona} / {tipo}")
 
     # ── Archivos fuente ────────────────────────────────────────────────────────
-    st.subheader("📤 Archivos Fuente (.xlsx)")
-    st.caption(
-        "Sube los archivos de los CR trabajados en el período. "
-        "Se guardan de forma permanente y estarán disponibles en futuras sesiones."
-    )
-
-    col_up, col_list = st.columns([1, 2])
-
-    with col_up:
-        uploaded = st.file_uploader(
-            "Arrastra o selecciona archivos .xlsx",
-            type=["xlsx"],
-            accept_multiple_files=True,
-            key=f"fuentes_{zona}_{tipo}",
-        )
-        if uploaded:
-            for f in uploaded:
-                # Guardar bytes en session_state (persiste entre pestañas)
-                st.session_state[fuentes_key][f.name] = f.read()
-            st.success(f"✅ {len(uploaded)} archivo(s) cargado(s)")
-            # Sin st.rerun() para no borrar el widget
-
-    with col_list:
-        ss_files = st.session_state[fuentes_key]   # { nombre: bytes }
-        if ss_files:
-            df_files = pd.DataFrame([
-                {
-                    "Archivo": nombre,
-                    "Tamaño":  f"{len(data)/1024:.1f} KB",
-                }
-                for nombre, data in ss_files.items()
-            ])
-            st.dataframe(df_files, use_container_width=True, hide_index=True)
-            st.caption(f"Total: **{len(ss_files)}** archivo(s) en esta sesión")
-
-            # Eliminar archivos
-            with st.expander("🗑️ Eliminar archivos"):
-                to_delete = st.multiselect(
-                    "Selecciona archivos a eliminar",
-                    options=list(ss_files.keys()),
-                )
-                if st.button("Eliminar seleccionados", disabled=not to_delete):
-                    for nombre in to_delete:
-                        st.session_state[fuentes_key].pop(nombre, None)
-                    st.success(f"Eliminados: {len(to_delete)}")
-                    st.rerun()
-        else:
-            st.info(f"No hay archivos fuente para {zona}/{tipo}. Sube tus .xlsx arriba.")
+    _seccion_fuentes(zona, tipo, fuentes_key)
 
     st.markdown("---")
 
