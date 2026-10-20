@@ -31,15 +31,25 @@ st.set_page_config(
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Ocultar solo los botones del toolbar, NO el header completo
-       (si se oculta el header con display:none, el botón de expandir la barra lateral desaparece) */
+    /* Ocultar botones del toolbar */
     #MainMenu { display: none !important; }
     footer { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
     [data-testid="stDeployButton"] { display: none !important; }
     [data-testid="stStatusWidget"] { display: none !important; }
-    /* Header transparente para que no tape el contenido */
-    header[data-testid="stHeader"] { background: transparent !important; }
+    [data-testid="stAppViewBlockContainer"] > div:first-child { display: none !important; }
+
+    /* Header transparente y SIN interceptar clicks — los tabs reciben el click directamente */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        pointer-events: none !important;
+    }
+    /* Reactivar clicks SOLO en el botón de expandir/colapsar barra lateral */
+    header[data-testid="stHeader"] [data-testid="collapsedControl"],
+    header[data-testid="stHeader"] button[kind="header"],
+    [data-testid="collapsedControl"] {
+        pointer-events: all !important;
+    }
 
     .block-container { padding-top: 1rem; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
