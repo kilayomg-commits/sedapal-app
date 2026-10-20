@@ -31,7 +31,12 @@ st.set_page_config(
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.5rem; }
+    /* Ocultar toolbar nativo de Streamlit para que no tape los tabs */
+    header[data-testid="stHeader"] { display: none; }
+    #MainMenu { display: none; }
+    footer { display: none; }
+
+    .block-container { padding-top: 1rem; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
     .metric-label { font-size: 0.85rem !important; }
 </style>
