@@ -31,25 +31,10 @@ st.set_page_config(
 # ─── CSS mínimo ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Ocultar botones del toolbar que no necesitamos */
     #MainMenu { display: none !important; }
     footer { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
     [data-testid="stDeployButton"] { display: none !important; }
-    [data-testid="stStatusWidget"] { display: none !important; }
-
-    /* Header: transparente y sin interceptar clicks sobre el contenido.
-       TODOS los botones dentro del header (incluye el toggle de la barra lateral,
-       independientemente de su data-testid exacto) siguen siendo clickables. */
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-        pointer-events: none !important;
-    }
-    header[data-testid="stHeader"] button {
-        pointer-events: all !important;
-    }
-
-    .block-container { padding-top: 1rem; }
     .stTabs [data-baseweb="tab"] { font-size: 1rem; font-weight: 600; }
     .metric-label { font-size: 0.85rem !important; }
 </style>
