@@ -12,6 +12,7 @@ from datetime import datetime
 from copy import copy
 from typing import Callable, Optional
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 from config import ZONA_CONFIG, PLANTILLA_START_ROW
 from modules.utils import (
@@ -124,6 +125,23 @@ def apply_style(dst_cell, style: dict) -> None:
     if "number_format" in style: dst_cell.number_format = style["number_format"]
 
 
+# Colores de respaldo para filas PM03 que no tienen fill en la plantilla de estilos
+_PM03_FALLBACK_FILLS = {
+    "TA_PM03": PatternFill(fill_type="solid", fgColor="FFC000"),  # naranja/ámbar
+    "AH_PM03": PatternFill(fill_type="solid", fgColor="92D050"),  # verde claro
+}
+
+
+def _row_has_fill(row_styles: list) -> bool:
+    """Devuelve True si alguna celda del row_style tiene un fill sólido definido."""
+    for s in row_styles:
+        if "fill" in s:
+            f = s["fill"]
+            if f.fill_type not in (None, "none"):
+                return True
+    return False
+
+
 def load_styles(wb_estilos, cfg: dict) -> dict:
     ws = wb_estilos["PLANTILLA MODELO"]
     num_cols = cfg["num_cols"]
@@ -136,6 +154,12 @@ def load_styles(wb_estilos, cfg: dict) -> dict:
             cell = ws.cell(row=fila, column=col)
             row_styles.append(copy_cell_style(cell))
         styles[nombre] = row_styles
+
+    # Si las filas PM03 de TA/AH no tienen fill en la plantilla, aplicar color de respaldo
+    for key, fallback_fill in _PM03_FALLBACK_FILLS.items():
+        if key in styles and not _row_has_fill(styles[key]):
+            for cell_style in styles[key]:
+                cell_style["fill"] = copy(fallback_fill)
 
     styles["TA_MAT"] = styles["MAT"]
     styles["AH_MAT"] = styles["MAT"]
