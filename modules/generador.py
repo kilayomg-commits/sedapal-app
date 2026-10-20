@@ -327,8 +327,9 @@ def build_cr_rows(
             for m in eq_data["TA"]
         ]
         ta_sub = sum((m["subtotal"] for m in ta_mats), Decimal("0"))
+        # qty y precio en blanco para filas PM03 de TA (solo Sub-Total)
         rows.append(_row(f"TA{eq_num}", cr_display, "TA", "PM03", None,
-                         pm03_descs["TA"], 1, ta_sub, ta_sub, fecha_str, "TA_PM03"))
+                         pm03_descs["TA"], None, None, ta_sub, fecha_str, "TA_PM03"))
         for mat in ta_mats:
             rows.append(_row(f"TA{eq_num}", cr_display, "TA", "MAT", mat["sap"],
                              mat["desc"], mat["qty"], mat["precio"], mat["subtotal"],
@@ -340,8 +341,9 @@ def build_cr_rows(
             for m in eq_data["AH"]
         ]
         ah_sub = sum((m["subtotal"] for m in ah_mats), Decimal("0"))
+        # qty y precio en blanco para filas PM03 de AH (solo Sub-Total)
         rows.append(_row(f"AH{eq_num}", cr_display, "AH", "PM03", None,
-                         pm03_descs["AH"], 1, ah_sub, ah_sub, fecha_str, "AH_PM03"))
+                         pm03_descs["AH"], None, None, ah_sub, fecha_str, "AH_PM03"))
         for mat in ah_mats:
             rows.append(_row(f"AH{eq_num}", cr_display, "AH", "MAT", mat["sap"],
                              mat["desc"], mat["qty"], mat["precio"], mat["subtotal"],
@@ -357,7 +359,9 @@ def _row(orden, ubicacion, linea_key, tipo, sap, desc, qty, precio, subtotal, fe
         "orden": orden, "operacion": 10,
         "ubicacion": ubicacion, "linea": LINEA_MAP[linea_key],
         "tipo": tipo, "sap": sap, "desc": desc,
-        "qty": Decimal(str(qty)), "precio": precio, "subtotal": subtotal,
+        "qty":   Decimal(str(qty)) if qty is not None else None,
+        "precio":  precio,
+        "subtotal": subtotal,
         "fecha": fecha, "row_type": row_type,
     }
 
@@ -374,6 +378,8 @@ def write_row_to_sheet(ws, row_num: int, row_data: dict, styles: dict, num_cols:
     row_styles = styles.get(style_key, [{}] * num_cols)
 
     # Primeras 11 columnas de datos
+    qty_val    = float(row_data["qty"])    if row_data["qty"]    is not None else None
+    precio_val = float(row_data["precio"]) if row_data["precio"] is not None else None
     data_cols = [
         row_data["orden"],           # C1
         10,                          # C2  operación
@@ -382,8 +388,8 @@ def write_row_to_sheet(ws, row_num: int, row_data: dict, styles: dict, num_cols:
         row_data["tipo"],            # C5
         row_data["sap"],             # C6
         row_data["desc"],            # C7
-        float(row_data["qty"]),      # C8
-        float(row_data["precio"]),   # C9
+        qty_val,                     # C8  (None → celda vacía)
+        precio_val,                  # C9  (None → celda vacía)
         float(row_data["subtotal"]), # C10
         row_data["fecha"],           # C11
     ]
