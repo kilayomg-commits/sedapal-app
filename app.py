@@ -167,33 +167,58 @@ with tab1:
     st.subheader("📋 Plantillas de Referencia")
     col_p1, col_p2 = st.columns(2)
 
+    _plantilla_orig_key = f"plantilla_orig_{zona}_{tipo}"
+    _estilos_orig_key   = f"estilos_orig_{zona}_{tipo}"
+
     with col_p1:
-        status_plantilla = "✅ Cargada" if plantilla_path.exists() else "❌ No cargada"
-        st.markdown(f"**Plantilla vacía (.xlsm)** — {status_plantilla}")
-        p_up = st.file_uploader(
-            "Sube la plantilla vacía",
-            type=["xlsm"],
-            key=f"plantilla_{zona}_{tipo}",
-        )
-        if p_up:
-            guardar_archivo(p_up, zona, tipo, "plantillas",
-                            nombre_fijo=f"plantilla_{zona.lower()}_vacia.xlsm")
-            st.success("✅ Plantilla guardada")
-            st.rerun()
+        st.markdown("**Plantilla vacía (.xlsm)**")
+        if plantilla_path.exists():
+            orig = st.session_state.get(_plantilla_orig_key, plantilla_path.name)
+            col_nombre, col_btn = st.columns([3, 1])
+            col_nombre.success(f"✅ `{orig}`")
+            if col_btn.button("🗑️ Quitar", key=f"del_plantilla_{zona}_{tipo}",
+                              use_container_width=True):
+                plantilla_path.unlink(missing_ok=True)
+                st.session_state.pop(_plantilla_orig_key, None)
+                st.rerun()
+        else:
+            st.warning("❌ No cargada")
+            p_up = st.file_uploader(
+                "Sube la plantilla vacía",
+                type=["xlsm"],
+                key=f"plantilla_{zona}_{tipo}",
+            )
+            if p_up:
+                guardar_archivo(p_up, zona, tipo, "plantillas",
+                                nombre_fijo=f"plantilla_{zona.lower()}_vacia.xlsm")
+                st.session_state[_plantilla_orig_key] = p_up.name
+                st.success("✅ Plantilla guardada")
+                st.rerun()
 
     with col_p2:
-        status_estilos = "✅ Cargado" if estilos_path.exists() else "❌ No cargado"
-        st.markdown(f"**Archivo de estilos/referencia (.xlsm)** — {status_estilos}")
-        e_up = st.file_uploader(
-            "Sube el archivo de referencia",
-            type=["xlsm"],
-            key=f"estilos_{zona}_{tipo}",
-        )
-        if e_up:
-            guardar_archivo(e_up, zona, tipo, "plantillas",
-                            nombre_fijo=f"estilos_{zona.lower()}_referencia.xlsm")
-            st.success("✅ Estilos guardados")
-            st.rerun()
+        st.markdown("**Archivo de estilos/referencia (.xlsm)**")
+        if estilos_path.exists():
+            orig = st.session_state.get(_estilos_orig_key, estilos_path.name)
+            col_nombre, col_btn = st.columns([3, 1])
+            col_nombre.success(f"✅ `{orig}`")
+            if col_btn.button("🗑️ Quitar", key=f"del_estilos_{zona}_{tipo}",
+                              use_container_width=True):
+                estilos_path.unlink(missing_ok=True)
+                st.session_state.pop(_estilos_orig_key, None)
+                st.rerun()
+        else:
+            st.warning("❌ No cargado")
+            e_up = st.file_uploader(
+                "Sube el archivo de referencia",
+                type=["xlsm"],
+                key=f"estilos_{zona}_{tipo}",
+            )
+            if e_up:
+                guardar_archivo(e_up, zona, tipo, "plantillas",
+                                nombre_fijo=f"estilos_{zona.lower()}_referencia.xlsm")
+                st.session_state[_estilos_orig_key] = e_up.name
+                st.success("✅ Estilos guardados")
+                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
