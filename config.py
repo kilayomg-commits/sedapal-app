@@ -24,9 +24,10 @@ MESES = [
 # Define las diferencias estructurales entre los archivos fuente de cada zona.
 ZONA_CONFIG = {
     "NORTE": {
-        "header_row": 5,   # Fila donde están los encabezados CR-XXX  N°Y
-        "tipo_row":   6,   # Fila con etiquetas BOMBA / TABLERO / ACCESORIOS
-        "data_start": 8,   # Primera fila con materiales
+        "header_row":      5,   # Fila donde están los encabezados CR-XXX  N°Y
+        "tipo_row":        6,   # Fila con etiquetas BOMBA / TABLERO / ACCESORIOS
+        "data_start":      8,   # Primera fila con materiales (CRs)
+        "pozo_data_start": 7,   # Primera fila con materiales (Pozos: BOMBA/etc en fila 5, CANT en fila 6)
         "ref_rows": {      # Filas de referencia de estilo en PLANTILLA MODELO
             "E_PM03":  10,
             "ACT":     11,

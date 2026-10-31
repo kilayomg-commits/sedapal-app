@@ -169,7 +169,11 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR") 
     """
     header_row  = cfg["header_row"]
     tipo_row    = cfg["tipo_row"]
-    data_start  = cfg["data_start"]
+    # Pozos pueden tener data_start diferente al de CRs (BOMBA/TABLERO/ACCES en misma fila que P code)
+    if tipo.upper() == "POZO" and "pozo_data_start" in cfg:
+        data_start = cfg["pozo_data_start"]
+    else:
+        data_start = cfg["data_start"]
 
     wb = load_workbook(filepath, data_only=True)
     ws = wb.active
@@ -191,33 +195,59 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR") 
 
     # Detectar columnas relevantes (BOMBA + adyacentes TABLERO/ACCES)
     relevant_cols: dict[int, dict] = {}
-    for col, text in h_headers.items():
-        if not cr_pattern.search(text):
-            continue
-        m_eq = re.search(r"n[°o]?\s*(\d+)", text, re.IGNORECASE)
-        if not m_eq:
-            continue
-        eq_num = int(m_eq.group(1))
 
-        for dc in range(0, 4):
-            next_col = col + dc
-            if dc > 0 and next_col in h_headers:
-                break
-            tipo_txt  = h_tipos.get(next_col, "")
-            tipo_norm = normalize(tipo_txt)
-            if not tipo_txt:
-                if dc == 0:
+    if tipo.upper() == "POZO":
+        # Layout Pozo: el código P y los encabezados BOMBA/TABLERO/ACCES están en la
+        # MISMA fila (header_row). Se buscan los tipos directamente en h_headers,
+        # empezando desde dc=1 (dc=0 es la celda con el código P mismo).
+        for col, text in h_headers.items():
+            if not cr_pattern.search(text):
+                continue
+            m_eq = re.search(r"n[°o]?\s*(\d+)", text, re.IGNORECASE)
+            if not m_eq:
+                continue
+            eq_num = int(m_eq.group(1))
+            for dc in range(1, 5):
+                next_col = col + dc
+                if next_col not in h_headers:
+                    break
+                adj_norm = normalize(h_headers[next_col])
+                if "bomb" in adj_norm or "equip" in adj_norm:
                     relevant_cols[next_col] = {"equipo": eq_num, "tipo": "E"}
-                break
-            if "bomb" in tipo_norm or "equip" in tipo_norm:
-                tipo = "E"
-            elif "tablero" in tipo_norm or "electr" in tipo_norm:
-                tipo = "TA"
-            elif "acces" in tipo_norm or "hidra" in tipo_norm:
-                tipo = "AH"
-            else:
-                break
-            relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo}
+                elif "tablero" in adj_norm or "electr" in adj_norm:
+                    relevant_cols[next_col] = {"equipo": eq_num, "tipo": "TA"}
+                elif "acces" in adj_norm or "hidra" in adj_norm:
+                    relevant_cols[next_col] = {"equipo": eq_num, "tipo": "AH"}
+                else:
+                    break  # Encabezado no-tipo → siguiente grupo P
+    else:
+        # Layout CR: el código CR está en header_row; BOMBA/TABLERO/ACCES en tipo_row
+        for col, text in h_headers.items():
+            if not cr_pattern.search(text):
+                continue
+            m_eq = re.search(r"n[°o]?\s*(\d+)", text, re.IGNORECASE)
+            if not m_eq:
+                continue
+            eq_num = int(m_eq.group(1))
+            for dc in range(0, 4):
+                next_col = col + dc
+                if dc > 0 and next_col in h_headers:
+                    break
+                tipo_txt  = h_tipos.get(next_col, "")
+                tipo_norm = normalize(tipo_txt)
+                if not tipo_txt:
+                    if dc == 0:
+                        relevant_cols[next_col] = {"equipo": eq_num, "tipo": "E"}
+                    break
+                if "bomb" in tipo_norm or "equip" in tipo_norm:
+                    tipo_key = "E"
+                elif "tablero" in tipo_norm or "electr" in tipo_norm:
+                    tipo_key = "TA"
+                elif "acces" in tipo_norm or "hidra" in tipo_norm:
+                    tipo_key = "AH"
+                else:
+                    break
+                relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo_key}
 
     if not relevant_cols:
         print(f"  ADVERTENCIA: Sin columnas para {prefix}-{cr_base} en {os.path.basename(filepath)}")
