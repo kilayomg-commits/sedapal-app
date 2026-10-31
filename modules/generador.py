@@ -72,6 +72,18 @@ def parse_filename(fname: str, tipo: str = "CR"):
 
 
 # ─── Catálogo (MATERIALES + ACTIVIDAD) ────────────────────────────────────────
+def _sap_str(raw) -> str:
+    """Convierte un valor SAP leído por openpyxl a string limpio.
+    openpyxl puede devolver floats enteros (10003486.0) para celdas
+    en 'General'; los normalizamos a '10003486' para que el lookup funcione.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, float) and raw.is_integer():
+        return str(int(raw))
+    return str(raw).strip()
+
+
 def load_catalog(wb_estilos) -> dict:
     catalog: dict = {}
 
@@ -79,7 +91,7 @@ def load_catalog(wb_estilos) -> dict:
     for row in ws_mat.iter_rows(min_row=2, values_only=True):
         if not row[0]:
             break
-        sap  = str(row[0]).strip()
+        sap  = _sap_str(row[0])
         desc = str(row[2]).strip() if row[2] else ""
         try:
             precio = excel_round(float(row[4])) if row[4] else Decimal("0")
@@ -91,7 +103,7 @@ def load_catalog(wb_estilos) -> dict:
     for row in ws_act.iter_rows(min_row=2, values_only=True):
         if not row[0]:
             break
-        sap  = str(row[0]).strip()
+        sap  = _sap_str(row[0])
         desc = str(row[2]).strip() if row[2] else ""
         try:
             precio = excel_round(float(row[3])) if row[3] else Decimal("0")
