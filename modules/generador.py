@@ -282,6 +282,7 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR",
                 relevant_cols[col + dc] = {"equipo": eq_num, "tipo": tipo_key}
             continue
 
+        vistos_grupo: set[str] = set()
         for dc in range(0, 4):
             next_col = col + dc
             if dc > 0 and next_col in h_headers:
@@ -292,8 +293,10 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR",
                     relevant_cols[next_col] = {"equipo": eq_num, "tipo": "E"}
                 break
             tipo_key = _tipo_from_text(tipo_txt)
-            if not tipo_key:
+            # Un tipo repetido (otro BOMBA) ya es el grupo del equipo siguiente
+            if not tipo_key or tipo_key in vistos_grupo:
                 break
+            vistos_grupo.add(tipo_key)
             relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo_key}
 
     if not relevant_cols:

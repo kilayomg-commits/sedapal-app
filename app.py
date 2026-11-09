@@ -2,6 +2,7 @@
 app.py — Interfaz principal ONCH · Automatizador SEDAPAL
 Ejecutar con:  streamlit run app.py
 """
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from modules.ingesta import (
 )
 from modules.generador import generar_plantilla
 from modules.conciliacion import leer_totales_output, comparar_con_esperado
+from modules import asistente
 
 # ─── Configuración de página ──────────────────────────────────────────────────
 st.set_page_config(
@@ -97,10 +99,14 @@ if fuentes_key not in st.session_state:
 
 
 # ─── TABS ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
+# Log de la última generación (lo usa la pestaña Asistente)
+logs_key = f"ss_logs_{output_fname}"
+
+tab1, tab2, tab3, tab4 = st.tabs([
     "📁  Gestión de Archivos",
     "⚙️  Generación",
     "📊  Conciliación",
+    "💬  Asistente",
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -281,6 +287,8 @@ with tab2:
         progress_bar = st.progress(0.0)
         all_logs = []
 
+        st.session_state[logs_key] = all_logs
+
         def on_log(msg, pct):
             all_logs.append(msg)
             log_area.code("\n".join(all_logs[-30:]))
@@ -299,6 +307,9 @@ with tab2:
             st.success(
                 f"✅ **{output_fname}** generado correctamente — {total_rows} filas"
             )
+            if any("Sin datos" in l or "SIN MAPEAR" in l or "IGNORADO" in l for l in all_logs):
+                st.info("Hubo observaciones en esta generación. Revisa la pestaña "
+                        "**💬 Asistente** para ver qué pasó y cómo corregirlo.")
         except Exception as exc:
             st.error(f"❌ Error durante la generación: {exc}")
             st.exception(exc)
@@ -315,6 +326,219 @@ with tab2:
             mime="application/vnd.ms-excel.sheet.macroenabled.12",
             use_container_width=False,
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — Asistente (sin IA: reglas sobre el log y los datos generados)
+# ══════════════════════════════════════════════════════════════════════════════
+# (Se ejecuta antes que Conciliación porque esa pestaña usa st.stop(), que corta
+#  el resto de la página cuando no hay archivo generado.)
+@st.cache_data(show_spinner=False)
+def _cargar_datos_asistente(path: str, mtime: float):
+    return asistente.cargar_datos(path)
+
+
+def _mostrar_hallazgos(hallazgos):
+    if not hallazgos:
+        st.info("Todavía no hay un log en esta sesión. Genera el archivo en la pestaña "
+                "**⚙️ Generación** y vuelve aquí.")
+        return
+    for h in hallazgos:
+        caja = {"error": st.error, "aviso": st.warning, "ok": st.success}[h.nivel]
+        caja(f"**{h.titulo}**\n\n{h.detalle}\n\n**Qué hacer:** {h.que_hacer}")
+        if h.items:
+            with st.expander(f"Ver detalle ({len(h.items)})"):
+                for it in h.items:
+                    st.markdown(f"- {it}")
+
+
+def _soles(x: float) -> str:
+    return f"S/ {x:,.2f}"
+
+
+with tab4:
+    st.header(f"💬 Asistente — {zona} / {tipo} / {MESES[mes_idx]} {anio}")
+    st.caption("Responde con el log de la última generación y el archivo generado de "
+               "esta zona, tipo y mes. Funciona sin IA y sin costo.")
+
+    logs_sesion = st.session_state.get(logs_key, [])
+    hallazgos = asistente.analizar_log(logs_sesion)
+    df_out = None
+    if output_path.exists():
+        try:
+            df_out = _cargar_datos_asistente(str(output_path), output_path.stat().st_mtime)
+        except Exception as exc:
+            st.warning(f"No pude leer `{output_fname}`: {exc}")
+
+    if df_out is None or df_out.empty:
+        st.info(f"Aún no existe `{output_fname}` con datos. Las preguntas sobre montos "
+                "y materiales se activan después de generar.")
+
+    # ── Pregunta libre ────────────────────────────────────────────────────────
+    duda = st.text_input(
+        "Escribe tu duda",
+        placeholder="Ej.: ¿cuánto suma P-642?  ·  ¿qué salió con precio 0?  ·  escobilla  ·  ¿por qué sin datos?",
+    )
+
+    if duda.strip():
+        q = asistente.normalize(duda)
+        respondido = False
+        hay_datos = df_out is not None and not df_out.empty
+
+        # 1) Un CR o Pozo concreto
+        m = re.search(r"\b(cr|p|pozo)[\s\-]*(\d+[a-z]?)\b", q)
+        if m and hay_datos:
+            pref = "CR" if m.group(1) == "cr" else "P"
+            cod = f"{pref}-{m.group(2).upper()}"
+            tot = asistente.totales_por_ubicacion(df_out)
+            if cod in tot.index:
+                r = tot.loc[cod]
+                st.success(
+                    f"**{cod}** suma **{_soles(r['Total'])}** con {int(r['Equipos'])} equipo(s): "
+                    f"Bomba {_soles(r['Bomba'])} · Tablero {_soles(r['Tablero'])} · "
+                    f"Accesorios {_soles(r['Accesorios'])}."
+                )
+                st.dataframe(asistente.detalle_ubicacion(df_out, cod),
+                             use_container_width=True, hide_index=True)
+            else:
+                motivo = next((h for h in hallazgos if cod in h.titulo), None)
+                if motivo:
+                    _mostrar_hallazgos([motivo])
+                else:
+                    st.warning(f"{cod} no está en `{output_fname}`. Revisa que su archivo "
+                               "fuente esté cargado y que la Zona y el Tipo sean los correctos.")
+            respondido = True
+
+        # 2) Temas generales
+        if not respondido and any(k in q for k in ("sin datos", "error", "problema", "fallo",
+                                                    "que paso", "ignorad", "observacion")):
+            _mostrar_hallazgos(hallazgos)
+            respondido = True
+        if not respondido and hay_datos and any(k in q for k in ("precio 0", "precio cero", "sin precio",
+                                                                  "sin sap", "sin codigo", "en cero")):
+            pc = asistente.precio_cero(df_out)
+            if pc.empty:
+                st.success("Ninguna fila de material o ACT salió con precio 0 ni sin código SAP.")
+            else:
+                st.warning(f"{len(pc)} fila(s) con precio 0 o sin código SAP:")
+                st.dataframe(pc, use_container_width=True, hide_index=True)
+            respondido = True
+        if not respondido and hay_datos and any(k in q for k in ("mas usad", "ranking", "top", "mas caro",
+                                                                  "mayor gasto")):
+            st.dataframe(asistente.ranking_materiales(df_out).head(15),
+                         use_container_width=True, hide_index=True)
+            respondido = True
+        if not respondido and hay_datos and any(k in q for k in ("total", "suma", "monto", "cuanto")):
+            rs = asistente.resumen(df_out)
+            st.success(
+                f"El mes suma **{_soles(rs['total'])}** en {rs['ubicaciones']} ubicación(es) y "
+                f"{rs['equipos']} equipo(s): Bomba {_soles(rs['bomba'])} · "
+                f"Tablero {_soles(rs['tablero'])} · Accesorios {_soles(rs['accesorios'])}."
+            )
+            respondido = True
+
+        # 3) Un material
+        if not respondido and hay_datos:
+            res = asistente.buscar_material(df_out, duda)
+            if not res.empty:
+                st.success(f"'{duda.strip()}' aparece en {res['Ubicación'].nunique()} ubicación(es), "
+                           f"cantidad total {res['Cantidad'].sum():,.2f}, "
+                           f"monto {_soles(res['Subtotal'].sum())}.")
+                st.dataframe(res, use_container_width=True, hide_index=True)
+                respondido = True
+
+        # 4) Preguntas frecuentes
+        faq = asistente.buscar_faq(duda)
+        if faq:
+            if respondido:
+                st.markdown("**También puede servirte:**")
+            for preg, resp in faq:
+                with st.expander(preg, expanded=not respondido):
+                    st.write(resp)
+            respondido = True
+
+        if not respondido:
+            st.info("No encontré una respuesta para eso. Prueba con el código de un CR o Pozo "
+                    "(ej. P-642), el nombre de un material, o elige una pregunta de abajo.")
+
+    st.markdown("---")
+
+    # ── Preguntas rápidas ─────────────────────────────────────────────────────
+    opcion = st.radio(
+        "O elige una pregunta",
+        [
+            "¿Qué pasó en la última generación?",
+            "¿Cuánto suma cada CR / Pozo?",
+            "¿Qué salió con precio 0 o sin código SAP?",
+            "¿Qué materiales pesan más en el monto?",
+            "Ver detalle de un CR / Pozo",
+            "Preguntas frecuentes",
+        ],
+        horizontal=True,
+        label_visibility="visible",
+    )
+
+    sin_datos_msg = "Esta respuesta necesita el archivo generado. Genera primero en **⚙️ Generación**."
+
+    if opcion == "¿Qué pasó en la última generación?":
+        _mostrar_hallazgos(hallazgos)
+        if logs_sesion:
+            with st.expander("Ver log completo"):
+                st.code("\n".join(logs_sesion))
+
+    elif opcion == "¿Cuánto suma cada CR / Pozo?":
+        if df_out is None or df_out.empty:
+            st.info(sin_datos_msg)
+        else:
+            rs = asistente.resumen(df_out)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total del mes", _soles(rs["total"]))
+            c2.metric("Ubicaciones", rs["ubicaciones"])
+            c3.metric("Equipos", rs["equipos"])
+            c4.metric("Filas", rs["filas"])
+            st.dataframe(
+                asistente.totales_por_ubicacion(df_out).style.format({
+                    "Bomba": "S/ {:,.2f}", "Tablero": "S/ {:,.2f}",
+                    "Accesorios": "S/ {:,.2f}", "Total": "S/ {:,.2f}", "Equipos": "{:.0f}",
+                }),
+                use_container_width=True,
+            )
+
+    elif opcion == "¿Qué salió con precio 0 o sin código SAP?":
+        if df_out is None or df_out.empty:
+            st.info(sin_datos_msg)
+        else:
+            pc = asistente.precio_cero(df_out)
+            if pc.empty:
+                st.success("Ninguna fila de material o ACT salió con precio 0 ni sin código SAP.")
+            else:
+                st.warning(f"{len(pc)} fila(s) con precio 0 o sin código SAP. "
+                           "Revisa las preguntas frecuentes para corregirlas.")
+                st.dataframe(pc, use_container_width=True, hide_index=True)
+
+    elif opcion == "¿Qué materiales pesan más en el monto?":
+        if df_out is None or df_out.empty:
+            st.info(sin_datos_msg)
+        else:
+            por = st.radio("Ordenar por", ["Subtotal", "Cantidad", "Usos"], horizontal=True)
+            st.dataframe(asistente.ranking_materiales(df_out, por=por).head(20),
+                         use_container_width=True, hide_index=True)
+
+    elif opcion == "Ver detalle de un CR / Pozo":
+        if df_out is None or df_out.empty:
+            st.info(sin_datos_msg)
+        else:
+            tot = asistente.totales_por_ubicacion(df_out)
+            cod = st.selectbox("Ubicación", sorted(tot.index))
+            r = tot.loc[cod]
+            st.success(f"**{cod}** suma **{_soles(r['Total'])}** con {int(r['Equipos'])} equipo(s).")
+            st.dataframe(asistente.detalle_ubicacion(df_out, cod),
+                         use_container_width=True, hide_index=True)
+
+    else:
+        for preg, resp in asistente.FAQ:
+            with st.expander(preg):
+                st.write(resp)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
