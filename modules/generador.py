@@ -18,7 +18,7 @@ from config import ZONA_CONFIG, PLANTILLA_START_ROW
 from modules.utils import (
     normalize, excel_round,
     match_keyword, match_keyword_loose,
-    SPECIAL_ITEMS,
+    SPECIAL_ITEMS, SPECIAL_PRECIOS_ZONA,
 )
 
 # ─── Descripciones PM03 y mapeo de línea ──────────────────────────────────────
@@ -86,7 +86,7 @@ def _sap_str(raw) -> str:
     return str(raw).strip()
 
 
-def load_catalog(wb_estilos) -> dict:
+def load_catalog(wb_estilos, zona: str = "") -> dict:
     catalog: dict = {}
 
     ws_mat = wb_estilos["MATERIALES"]
@@ -115,6 +115,11 @@ def load_catalog(wb_estilos) -> dict:
 
     for token, info in SPECIAL_ITEMS.items():
         catalog[token] = {"desc": info["desc"], "precio": info["precio"]}
+
+    # Precios especiales propios de una zona (ej. brocha en CENTRO)
+    for token, precio in SPECIAL_PRECIOS_ZONA.get(zona.upper(), {}).items():
+        if token in catalog:
+            catalog[token]["precio"] = precio
 
     return catalog
 
@@ -371,7 +376,7 @@ def resolver_material(mat: dict, catalog: dict, unmapped_log: list, tag: str) ->
         sp = SPECIAL_ITEMS[sap_token]
         sap_code = sp.get("sap")
         desc_final = sp["desc"]
-        precio     = sp["precio"]
+        precio     = catalog.get(sap_token, {}).get("precio", sp["precio"])
     else:
         info = catalog.get(sap_token, {"desc": mat["desc"], "precio": Decimal("0")})
         sap_code, desc_final, precio = sap_token, info["desc"], info["precio"]
@@ -568,7 +573,7 @@ def generar_plantilla(
     # 1. Catálogo y estilos
     log("[1/4] Cargando catálogo y estilos...", 0.05)
     wb_estilos = load_workbook(estilos_path, keep_vba=True, data_only=True)
-    catalog = load_catalog(wb_estilos)
+    catalog = load_catalog(wb_estilos, zona)
     styles  = load_styles(wb_estilos, cfg)
     wb_estilos.close()
     log(f"  Catálogo: {len(catalog)} entradas", 0.10)

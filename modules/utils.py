@@ -108,6 +108,11 @@ SPECIAL_ITEMS: Dict[str, dict] = {
     },
 }
 
+# Precios que reemplazan al de SPECIAL_ITEMS según la zona
+SPECIAL_PRECIOS_ZONA: Dict[str, Dict[str, Decimal]] = {
+    "CENTRO": {"BROCHA": Decimal("6.83")},
+}
+
 
 def match_keyword(desc: str) -> Optional[str]:
     """Retorna el token SAP si encuentra coincidencia exacta de keyword."""
