@@ -630,7 +630,15 @@ with tab3:
             type=["csv", "xlsx"],
             key=f"esp_upload_{session_key}",
         )
-        if esp_file:
+        # Importar una sola vez por archivo: el uploader conserva el archivo entre
+        # recargas, y re-importar + st.rerun() en cada recarga anulaba el clic en
+        # "Calcular Conciliación".
+        imp_key = f"importado_{session_key}"
+        if esp_file is None:
+            st.session_state.pop(imp_key, None)
+        elif st.session_state.get(imp_key) == (esp_file.name, esp_file.size):
+            st.success(f"✅ Importado: {esp_file.name}")
+        else:
             try:
                 if esp_file.name.endswith(".csv"):
                     df_imp = pd.read_csv(esp_file)
@@ -650,7 +658,13 @@ with tab3:
                     df_base = st.session_state[session_key].copy()
                     df_base["Monto Esperado (S/)"] = df_base["CR"].map(imp_dict).fillna(0.0)
                     st.session_state[session_key] = df_base
-                    st.success("✅ Importado correctamente")
+                    st.session_state[imp_key] = (esp_file.name, esp_file.size)
+                    # El editor guarda sus propias ediciones; se limpian para que
+                    # muestre los montos importados
+                    try:
+                        del st.session_state[f"editor_{session_key}"]
+                    except Exception:
+                        pass
                     st.rerun()
                 else:
                     st.error(f"El archivo debe tener columnas '{etiqueta}' y 'Monto Esperado'.")
