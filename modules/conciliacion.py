@@ -3,7 +3,28 @@ from typing import Optional, List, Dict, Tuple
 conciliacion.py — Lee los totales del archivo XLSM generado y los compara
 con los montos teóricos/esperados ingresados por el usuario.
 """
+import re
+
 from openpyxl import load_workbook
+
+
+PREFIJOS = ("CR-", "P-")   # ubicaciones que se concilian: CR y Pozos
+
+
+def normalizar_codigo(valor, prefijo: str = "CR") -> str:
+    """
+    Lleva un código escrito a mano al formato del archivo generado:
+    'P 642', 'p-642', 'P642' → 'P-642';  '642' → '<prefijo>-642'.
+    """
+    t = str(valor).strip().upper()
+    if t.endswith(".0") and t[:-2].isdigit():
+        t = t[:-2]
+    m = re.match(r"^(CR|POZO|P)?[\s\-\.]*(\d+[A-Z]?)(.*)$", t)
+    if not m:
+        return t
+    pref = m.group(1) or prefijo
+    pref = "P" if pref == "POZO" else pref
+    return f"{pref}-{m.group(2)}{m.group(3).strip()}"
 
 
 # ─── Lectura del archivo generado ─────────────────────────────────────────────
@@ -33,7 +54,7 @@ def leer_totales_output(filepath: str) -> dict:
         if not row[2]:
             continue
         cr = str(row[2]).strip()
-        if not cr.startswith("CR-"):
+        if not cr.startswith(PREFIJOS):
             continue
 
         tipo_fila = str(row[4]).strip() if row[4] else ""  # Col E

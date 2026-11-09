@@ -19,7 +19,7 @@ from modules.ingesta import (
     get_plantilla_path, get_estilos_path,
 )
 from modules.generador import generar_plantilla
-from modules.conciliacion import leer_totales_output, comparar_con_esperado
+from modules.conciliacion import leer_totales_output, comparar_con_esperado, normalizar_codigo
 from modules import asistente
 
 # ─── Configuración de página ──────────────────────────────────────────────────
@@ -561,19 +561,24 @@ with tab3:
         st.error(f"No se pudo leer el archivo generado: {exc}")
         st.stop()
 
+    # Etiqueta visible según el tipo (la columna interna sigue llamándose "CR")
+    etiqueta  = "Pozo" if tipo == "POZO" else "CR"
+    etiquetas = "Pozos" if tipo == "POZO" else "CRs"
+    prefijo   = "P" if tipo == "POZO" else "CR"
+
     crs_detectados = sorted(totales_reales.keys())
 
     if not crs_detectados:
-        st.warning("El archivo generado no contiene filas PM03 legibles.")
+        st.warning(f"El archivo generado no contiene filas PM03 de {etiquetas} legibles.")
         st.stop()
 
-    st.caption(f"CRs detectados en el archivo: **{', '.join(crs_detectados)}**")
+    st.caption(f"{etiquetas} detectados en el archivo: **{', '.join(crs_detectados)}**")
     st.markdown("---")
 
     # ── Ingresar montos esperados ──────────────────────────────────────────────
     st.subheader("📥 Montos Esperados / Teóricos")
     st.caption(
-        "Ingresa el monto total esperado por CR. "
+        f"Ingresa el monto total esperado por {etiqueta}. "
         "Puede ser el valor del contrato, la pre-valorización o el presupuesto aprobado."
     )
 
@@ -605,7 +610,7 @@ with tab3:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "CR": st.column_config.TextColumn("CR", disabled=True, width="small"),
+                "CR": st.column_config.TextColumn(etiqueta, disabled=True, width="small"),
                 "Monto Esperado (S/)": st.column_config.NumberColumn(
                     "Monto Esperado (S/)",
                     format="S/ %.2f",
@@ -632,18 +637,23 @@ with tab3:
                 else:
                     df_imp = pd.read_excel(esp_file)
                 # Buscar columnas CR y Monto
-                col_cr  = next((c for c in df_imp.columns if "cr" in c.lower()), None)
+                col_cr  = next((c for c in df_imp.columns
+                                if any(k in str(c).lower() for k in ("cr", "pozo", "ubic", "codigo", "código"))), None)
                 col_mon = next((c for c in df_imp.columns if "monto" in c.lower() or
                                 "esperado" in c.lower() or "teorico" in c.lower()), None)
                 if col_cr and col_mon:
-                    imp_dict = dict(zip(df_imp[col_cr].astype(str), df_imp[col_mon].astype(float)))
+                    imp_dict = {
+                        normalizar_codigo(k, prefijo): float(v)
+                        for k, v in zip(df_imp[col_cr], df_imp[col_mon])
+                        if pd.notna(k) and pd.notna(v)
+                    }
                     df_base = st.session_state[session_key].copy()
                     df_base["Monto Esperado (S/)"] = df_base["CR"].map(imp_dict).fillna(0.0)
                     st.session_state[session_key] = df_base
                     st.success("✅ Importado correctamente")
                     st.rerun()
                 else:
-                    st.error("El archivo debe tener columnas 'CR' y 'Monto Esperado'.")
+                    st.error(f"El archivo debe tener columnas '{etiqueta}' y 'Monto Esperado'.")
             except Exception as exc:
                 st.error(f"Error al importar: {exc}")
 
@@ -675,7 +685,8 @@ with tab3:
             f"{total_dif:+,.2f}",
             delta_color="inverse" if total_dif < 0 else "normal",
         )
-        m4.metric("CRs conciliados", len(df_res))
+        m4.metric(f"{etiquetas} conciliados", len(df_res))
+        df_res = df_res.rename(columns={"CR": etiqueta})
 
         st.markdown("")
 
