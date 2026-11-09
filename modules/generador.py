@@ -163,94 +163,143 @@ def load_styles(wb_estilos, cfg: dict) -> dict:
 
 
 # ─── Parseo del archivo fuente ────────────────────────────────────────────────
-def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR") -> list[dict]:
+_SCAN_ROWS = 15   # filas superiores donde se busca la cabecera si no está donde dice config
+
+
+def _tipo_from_text(text) -> Optional[str]:
+    """Devuelve 'E' / 'TA' / 'AH' si el texto es una etiqueta BOMBA / TABLERO / ACCESORIOS."""
+    t = normalize(str(text)) if text else ""
+    if "bomb" in t or "equip" in t:
+        return "E"
+    if "tablero" in t or "electr" in t:
+        return "TA"
+    if "acces" in t or "hidra" in t:
+        return "AH"
+    return None
+
+
+def _row_texts(ws, r: int) -> dict:
+    return {c.column: str(c.value) for c in ws[r] if c.value not in (None, "")}
+
+
+def _locate_layout(ws, cr_pattern, cfg: dict):
+    """
+    Ubica (header_row, tipo_row, data_start) en una hoja.
+    Primero prueba las filas de config; si el código no está ahí, lo busca en las
+    primeras filas y deduce la fila de tipos (BOMBA/TABLERO/ACCESORIOS) a partir de él.
+    Devuelve None si la hoja no contiene el código.
+    """
+    hr = cfg["header_row"]
+    if any(cr_pattern.search(t) for t in _row_texts(ws, hr).values()):
+        return hr, cfg["tipo_row"], cfg["data_start"]
+
+    for r in range(1, _SCAN_ROWS + 1):
+        if not any(cr_pattern.search(t) for t in _row_texts(ws, r).values()):
+            continue
+        for tr in range(r, r + 4):
+            if any(_tipo_from_text(t) for t in _row_texts(ws, tr).values()):
+                return r, tr, tr + 1
+        return r, r + 1, r + 2
+    return None
+
+
+def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR",
+                      diag: Optional[list] = None) -> list[dict]:
     """
     Lee el archivo fuente y devuelve lista de equipos con sus materiales E/TA/AH.
+    CR y Pozo comparten el mismo layout; solo cambia el prefijo del código (CR / P).
+    Si no se encuentran datos, se agrega el motivo a `diag` (si se pasa).
     """
-    header_row  = cfg["header_row"]
-    tipo_row    = cfg["tipo_row"]
-    # Pozos pueden tener data_start diferente al de CRs (BOMBA/TABLERO/ACCES en misma fila que P code)
-    if tipo.upper() == "POZO" and "pozo_data_start" in cfg:
-        data_start = cfg["pozo_data_start"]
-    else:
-        data_start = cfg["data_start"]
+    def _diag(msg: str):
+        if diag is not None:
+            diag.append(msg)
+        print(f"  ADVERTENCIA: {msg}")
 
     wb = load_workbook(filepath, data_only=True)
-    ws = wb.active
 
     cr_base = re.match(r"(\d+[A-Za-z]?)", cr_code).group(1)
     prefix = "P" if tipo.upper() == "POZO" else "CR"
-    cr_pattern = re.compile(rf"{prefix}[\s\-]*" + re.escape(cr_base) + r"\b", re.IGNORECASE)
+    cr_pattern = re.compile(
+        rf"(?<![A-Za-z]){prefix}[\s\-\.]*" + re.escape(cr_base) + r"(?![0-9A-Za-z])",
+        re.IGNORECASE,
+    )
 
-    # Leer filas de cabecera
-    h_headers: dict[int, str] = {}
-    for cell in ws[header_row]:
-        if cell.value:
-            h_headers[cell.column] = str(cell.value)
+    # Elegir hoja: la activa primero; si no tiene el código, probar las demás
+    ws = None
+    layout = None
+    for cand in [wb.active] + [s for s in wb.worksheets if s is not wb.active]:
+        if not hasattr(cand, "iter_rows"):
+            continue
+        layout = _locate_layout(cand, cr_pattern, cfg)
+        if layout:
+            ws = cand
+            break
 
-    h_tipos: dict[int, str] = {}
-    for cell in ws[tipo_row]:
-        if cell.value:
-            h_tipos[cell.column] = str(cell.value)
+    if not layout:
+        act = wb.active
+        vistos = []
+        for r in range(1, _SCAN_ROWS + 1):
+            for t in _row_texts(act, r).values():
+                if re.search(r"\b(CR|P)[\s\-\.]*\d", t, re.IGNORECASE) and t not in vistos:
+                    vistos.append(t)
+        _diag(
+            f"no se encontró '{prefix} {cr_base}' en ninguna hoja de {os.path.basename(filepath)}. "
+            f"Hoja activa: '{act.title}'. Encabezados vistos: {vistos[:6] or 'ninguno'}"
+        )
+        wb.close()
+        return []
+
+    header_row, tipo_row, data_start = layout
+    h_headers = _row_texts(ws, header_row)
+    h_tipos   = _row_texts(ws, tipo_row)
+    same_row  = (tipo_row == header_row)
 
     # Detectar columnas relevantes (BOMBA + adyacentes TABLERO/ACCES)
     relevant_cols: dict[int, dict] = {}
+    usados: set[int] = set()
+    for col in sorted(h_headers):
+        text = h_headers[col]
+        if not cr_pattern.search(text):
+            continue
+        # N° de equipo: acepta N°, Nº, No, N., N' o solo "N 1"
+        m_eq = re.search(r"n\s*[°ºo\.'´’`]*\s*(\d+)", text[cr_pattern.search(text).end():], re.IGNORECASE)
+        if m_eq:
+            eq_num = int(m_eq.group(1))
+        else:
+            eq_num = 1
+            while eq_num in usados:
+                eq_num += 1
+        usados.add(eq_num)
 
-    if tipo.upper() == "POZO":
-        # Layout Pozo: el código P y los encabezados BOMBA/TABLERO/ACCES están en la
-        # MISMA fila (header_row). Se buscan los tipos directamente en h_headers,
-        # empezando desde dc=1 (dc=0 es la celda con el código P mismo).
-        for col, text in h_headers.items():
-            if not cr_pattern.search(text):
-                continue
-            m_eq = re.search(r"n[°o]?\s*(\d+)", text, re.IGNORECASE)
-            if not m_eq:
-                continue
-            eq_num = int(m_eq.group(1))
+        if same_row:
+            # Etiquetas BOMBA/TABLERO/ACCES en la misma fila, a la derecha del código
             for dc in range(1, 5):
-                next_col = col + dc
-                if next_col not in h_headers:
+                tipo_key = _tipo_from_text(h_tipos.get(col + dc))
+                if not tipo_key:
                     break
-                adj_norm = normalize(h_headers[next_col])
-                if "bomb" in adj_norm or "equip" in adj_norm:
+                relevant_cols[col + dc] = {"equipo": eq_num, "tipo": tipo_key}
+            continue
+
+        for dc in range(0, 4):
+            next_col = col + dc
+            if dc > 0 and next_col in h_headers:
+                break
+            tipo_txt = h_tipos.get(next_col, "")
+            if not tipo_txt:
+                if dc == 0:
                     relevant_cols[next_col] = {"equipo": eq_num, "tipo": "E"}
-                elif "tablero" in adj_norm or "electr" in adj_norm:
-                    relevant_cols[next_col] = {"equipo": eq_num, "tipo": "TA"}
-                elif "acces" in adj_norm or "hidra" in adj_norm:
-                    relevant_cols[next_col] = {"equipo": eq_num, "tipo": "AH"}
-                else:
-                    break  # Encabezado no-tipo → siguiente grupo P
-    else:
-        # Layout CR: el código CR está en header_row; BOMBA/TABLERO/ACCES en tipo_row
-        for col, text in h_headers.items():
-            if not cr_pattern.search(text):
-                continue
-            m_eq = re.search(r"n[°o]?\s*(\d+)", text, re.IGNORECASE)
-            if not m_eq:
-                continue
-            eq_num = int(m_eq.group(1))
-            for dc in range(0, 4):
-                next_col = col + dc
-                if dc > 0 and next_col in h_headers:
-                    break
-                tipo_txt  = h_tipos.get(next_col, "")
-                tipo_norm = normalize(tipo_txt)
-                if not tipo_txt:
-                    if dc == 0:
-                        relevant_cols[next_col] = {"equipo": eq_num, "tipo": "E"}
-                    break
-                if "bomb" in tipo_norm or "equip" in tipo_norm:
-                    tipo_key = "E"
-                elif "tablero" in tipo_norm or "electr" in tipo_norm:
-                    tipo_key = "TA"
-                elif "acces" in tipo_norm or "hidra" in tipo_norm:
-                    tipo_key = "AH"
-                else:
-                    break
-                relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo_key}
+                break
+            tipo_key = _tipo_from_text(tipo_txt)
+            if not tipo_key:
+                break
+            relevant_cols[next_col] = {"equipo": eq_num, "tipo": tipo_key}
 
     if not relevant_cols:
-        print(f"  ADVERTENCIA: Sin columnas para {prefix}-{cr_base} en {os.path.basename(filepath)}")
+        _diag(
+            f"'{prefix} {cr_base}' está en la fila {header_row} de la hoja '{ws.title}', "
+            f"pero no hay columnas BOMBA/TABLERO/ACCESORIOS en la fila {tipo_row}: "
+            f"{list(h_tipos.values())[:6]}"
+        )
         wb.close()
         return []
 
@@ -292,12 +341,18 @@ def parse_source_file(filepath: str, cr_code: str, cfg: dict, tipo: str = "CR") 
                 equipos[eq_num] = {"E": [], "TA": [], "AH": []}
             equipos[eq_num][tipo].append({"desc": desc_str, "qty": qty})
 
+    ws_title = ws.title
     wb.close()
     result = []
     for eq_num in sorted(equipos.keys()):
         d = equipos[eq_num]
         if d["E"] or d["TA"] or d["AH"]:
             result.append({"equipo": eq_num, "E": d["E"], "TA": d["TA"], "AH": d["AH"]})
+    if not result:
+        _diag(
+            f"'{prefix} {cr_base}' encontrado (hoja '{ws_title}', fila {header_row}), "
+            f"pero todas sus columnas de cantidad están vacías o en 0"
+        )
     return result
 
 
@@ -522,7 +577,8 @@ def generar_plantilla(
         fecha_str = fecha.strftime("%d/%m/%Y") if fecha else ""
         log(f"  [{i+1}/{n}] {prefix}-{cr_code} ({fecha_str})", pct)
 
-        equipos = parse_source_file(filepath, cr_code, cfg, tipo=tipo)
+        diag: list[str] = []
+        equipos = parse_source_file(filepath, cr_code, cfg, tipo=tipo, diag=diag)
         for eq in equipos:
             log(
                 f"    N°{eq['equipo']}: "
@@ -532,6 +588,8 @@ def generar_plantilla(
 
         if not equipos:
             log(f"    ⚠ Sin datos para {prefix}-{cr_code}", pct)
+            for d in diag:
+                log(f"      ↳ {d}", pct)
             continue
 
         base = re.match(r"(\d+[A-Za-z]?)", cr_code).group(1)
