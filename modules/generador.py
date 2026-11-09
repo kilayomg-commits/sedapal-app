@@ -30,6 +30,8 @@ PM03_DESCS = {
 LINEA_MAP = {"E": 1, "TA": 2, "AH": 3}
 
 
+ACT_POZO = "10003485"   # MP en Pozo (código único para todos los Pozos)
+
 # ─── ACT code según número de equipos ─────────────────────────────────────────
 def get_act_code(num_equipos: int) -> str:
     if num_equipos <= 2:   return "10003486"
@@ -387,8 +389,16 @@ def build_cr_rows(
 ) -> list[dict]:
     rows = []
     num_equipos = len(equipos_data)
-    act_sap     = get_act_code(num_equipos)
-    act_info    = catalog.get(act_sap, {"desc": "MP en CR", "precio": Decimal("0")})
+    es_pozo     = tipo.upper() == "POZO"
+    # Pozos: siempre 10003485 (MP en Pozo), sin importar el número de equipos
+    act_sap     = ACT_POZO if es_pozo else get_act_code(num_equipos)
+    if act_sap not in catalog:
+        aviso = f"ACT {act_sap} no está en la hoja ACTIVIDAD del archivo de estilos → precio 0"
+        if aviso not in unmapped_log:
+            unmapped_log.append(aviso)
+    act_info    = catalog.get(
+        act_sap, {"desc": "MP en Pozo" if es_pozo else "MP en CR", "precio": Decimal("0")}
+    )
     act_precio  = act_info["precio"]
     prefix      = "P" if tipo.upper() == "POZO" else "CR"
     cr_display  = f"{prefix}-{cr_base}"
