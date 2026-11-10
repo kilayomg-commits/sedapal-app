@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from config import DATA_DIR
+from modules import almacen
 
 
 # ─── Supabase (opcional) ──────────────────────────────────────────────────────
@@ -17,49 +18,21 @@ _BUCKET  = "plantillas"
 _TMP_DIR = Path("/tmp/sedapal_plantillas")
 
 
-def _supabase_client():
-    """Devuelve cliente Supabase o None si no está configurado."""
-    try:
-        import streamlit as st
-        url = st.secrets.get("SUPABASE_URL")
-        key = st.secrets.get("SUPABASE_KEY")
-        if not url or not key:
-            return None
-        from supabase import create_client
-        return create_client(url, key)
-    except Exception:
-        return None
-
-
 def _subir_supabase(nombre: str, data: bytes) -> bool:
-    """Sube bytes al bucket de plantillas. Retorna True si OK."""
-    sb = _supabase_client()
-    if not sb:
-        return False
-    try:
-        sb.storage.from_(_BUCKET).upload(
-            nombre,
-            data,
-            file_options={
-                "upsert": "true",
-                "content-type": "application/octet-stream",
-            },
-        )
-        return True
-    except Exception as e:
-        print(f"[Supabase] Error subiendo {nombre}: {e}")
-        return False
+    """Sube bytes al bucket de plantillas. Retorna True si quedó en Supabase."""
+    return almacen.guardar(nombre, data)
 
 
 def _descargar_supabase(nombre: str) -> Optional[bytes]:
     """Descarga un archivo del bucket. Retorna bytes o None."""
-    sb = _supabase_client()
-    if not sb:
-        return None
-    try:
-        return sb.storage.from_(_BUCKET).download(nombre)
-    except Exception:
-        return None
+    return almacen.leer(nombre)
+
+
+def quitar_plantilla(path: Path) -> None:
+    """Quita una plantilla/estilos de todos los lugares (caché, Supabase y disco)."""
+    almacen.borrar(path.name)
+    _tmp_path(path.name).unlink(missing_ok=True)
+    Path(path).unlink(missing_ok=True)
 
 
 def _tmp_path(nombre: str) -> Path:

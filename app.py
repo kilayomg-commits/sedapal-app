@@ -2,6 +2,7 @@
 app.py — Interfaz principal ONCH · Automatizador SEDAPAL
 Ejecutar con:  streamlit run app.py
 """
+import io
 import re
 import sys
 from pathlib import Path
@@ -20,7 +21,8 @@ from modules.ingesta import (
 )
 from modules.generador import generar_plantilla
 from modules.conciliacion import leer_totales_output, comparar_con_esperado, normalizar_codigo
-from modules import asistente
+from modules import asistente, almacen
+from modules.ingesta import quitar_plantilla
 
 # ─── Configuración de página ──────────────────────────────────────────────────
 st.set_page_config(
@@ -80,6 +82,11 @@ with col_anio:
 mes_label    = f"{MESES[mes_idx].upper()}{anio}"
 output_fname = f"{zona}_{tipo}_{mes_label}.xlsm"
 output_path  = OUTPUT_DIR / output_fname
+if not output_path.exists() and not st.session_state.get(f"_salida_revisada_{output_fname}"):
+    _prev = almacen.leer_salida(output_fname)
+    if _prev:
+        output_path.write_bytes(_prev)
+    st.session_state[f"_salida_revisada_{output_fname}"] = True
 plantilla_path = get_plantilla_path(zona, tipo)
 estilos_path   = get_estilos_path(zona, tipo)
 
@@ -94,7 +101,19 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ─── Session state — archivos fuente (persisten al cambiar de pestaña) ────────
 fuentes_key = f"ss_fuentes_{zona}_{tipo}"
 if fuentes_key not in st.session_state:
-    st.session_state[fuentes_key] = {}   # { nombre_archivo: bytes }
+    with st.spinner("Cargando archivos guardados…"):
+        st.session_state[fuentes_key] = almacen.cargar_fuentes(zona, tipo)   # { nombre: bytes }
+_guardados_key = f"_fuentes_guardadas_{zona}_{tipo}"
+if _guardados_key not in st.session_state:
+    st.session_state[_guardados_key] = set(st.session_state[fuentes_key].keys())
+
+# Aviso si el guardado permanente no está activo
+_alm = almacen.estado()
+if not _alm["persistente"]:
+    st.warning(
+        "⚠️ **El guardado permanente no está activo**: lo que subas se perderá cuando la app "
+        f"se reinicie o se actualice. {_alm['detalle']}"
+    )
 
 
 
@@ -119,7 +138,7 @@ with tab1:
     st.subheader("📤 Archivos Fuente (.xlsx)")
     st.caption(
         "Sube los archivos de los CR trabajados en el período. "
-        "Se guardan en esta sesión y estarán disponibles en todas las pestañas."
+        "Se guardan de forma permanente: al volver a entrar seguirán aquí hasta que los elimines."
     )
 
     # Versión del uploader — se incrementa al eliminar archivos para resetear el widget
@@ -141,7 +160,12 @@ with tab1:
                 content = f.read()
                 if content:
                     st.session_state[fuentes_key][f.name] = content
+                    if f.name not in st.session_state[_guardados_key]:
+                        almacen.guardar_fuente(zona, tipo, f.name, content)
+                        st.session_state[_guardados_key].add(f.name)
             st.success(f"✅ {len(uploaded)} archivo(s) cargado(s)")
+            if almacen.ultimo_error():
+                st.error(almacen.ultimo_error())
 
     with col_list:
         ss_files = st.session_state[fuentes_key]
@@ -151,7 +175,7 @@ with tab1:
                 for nombre, data in ss_files.items()
             ])
             st.dataframe(df_files, use_container_width=True, hide_index=True)
-            st.caption(f"Total: **{len(ss_files)}** archivo(s) en esta sesión")
+            st.caption(f"Total: **{len(ss_files)}** archivo(s) guardado(s)")
 
             with st.expander("🗑️ Eliminar archivos"):
                 to_delete = st.multiselect(
@@ -161,7 +185,16 @@ with tab1:
                 if st.button("Eliminar seleccionados", disabled=not to_delete):
                     for nombre in to_delete:
                         st.session_state[fuentes_key].pop(nombre, None)
+                        st.session_state[_guardados_key].discard(nombre)
+                        almacen.borrar_fuente(zona, tipo, nombre)
                     # Incrementar versión para resetear el widget y no re-cargar archivos eliminados
+                    st.session_state[_uploader_v_key] += 1
+                    st.rerun()
+                if st.button("Eliminar TODOS los archivos fuente", key=f"del_all_{zona}_{tipo}"):
+                    for nombre in list(ss_files.keys()):
+                        almacen.borrar_fuente(zona, tipo, nombre)
+                    st.session_state[fuentes_key] = {}
+                    st.session_state[_guardados_key] = set()
                     st.session_state[_uploader_v_key] += 1
                     st.rerun()
         else:
@@ -184,7 +217,7 @@ with tab1:
             col_nombre.success(f"✅ `{orig}`")
             if col_btn.button("🗑️ Quitar", key=f"del_plantilla_{zona}_{tipo}",
                               use_container_width=True):
-                plantilla_path.unlink(missing_ok=True)
+                quitar_plantilla(plantilla_path)
                 st.session_state.pop(_plantilla_orig_key, None)
                 st.rerun()
         else:
@@ -199,6 +232,8 @@ with tab1:
                                 nombre_fijo=f"plantilla_{zona.lower()}_vacia.xlsm")
                 st.session_state[_plantilla_orig_key] = p_up.name
                 st.success("✅ Plantilla guardada")
+                if almacen.ultimo_error():
+                    st.error(almacen.ultimo_error())
                 st.rerun()
 
     with col_p2:
@@ -209,7 +244,7 @@ with tab1:
             col_nombre.success(f"✅ `{orig}`")
             if col_btn.button("🗑️ Quitar", key=f"del_estilos_{zona}_{tipo}",
                               use_container_width=True):
-                estilos_path.unlink(missing_ok=True)
+                quitar_plantilla(estilos_path)
                 st.session_state.pop(_estilos_orig_key, None)
                 st.rerun()
         else:
@@ -307,6 +342,9 @@ with tab2:
             st.success(
                 f"✅ **{output_fname}** generado correctamente — {total_rows} filas"
             )
+            if not almacen.guardar_salida(output_fname, output_path.read_bytes()):
+                st.warning("No pude guardar el archivo generado de forma permanente; "
+                           "descárgalo ahora para no perderlo.")
             if any("Sin datos" in l or "SIN MAPEAR" in l or "IGNORADO" in l for l in all_logs):
                 st.info("Hubo observaciones en esta generación. Revisa la pestaña "
                         "**💬 Asistente** para ver qué pasó y cómo corregirlo.")
@@ -583,11 +621,22 @@ with tab3:
     )
 
     session_key = f"esperados_{zona}_{tipo}_{mes_label}"
+    esp_clave   = f"{zona}_{tipo}_{mes_label}"
     if session_key not in st.session_state:
-        st.session_state[session_key] = pd.DataFrame({
+        df_ini = pd.DataFrame({
             "CR":                  crs_detectados,
             "Monto Esperado (S/)": [0.0] * len(crs_detectados),
         })
+        # Recuperar los montos guardados antes (si los hay)
+        _txt = almacen.leer_esperados(esp_clave)
+        if _txt:
+            try:
+                _prev = pd.read_json(io.StringIO(_txt))
+                _mapa = dict(zip(_prev["CR"], _prev["Monto Esperado (S/)"]))
+                df_ini["Monto Esperado (S/)"] = df_ini["CR"].map(_mapa).fillna(0.0)
+            except Exception:
+                pass
+        st.session_state[session_key] = df_ini
     else:
         # Mantener sincronizado si cambiaron los CRs
         existing = st.session_state[session_key]
@@ -622,6 +671,11 @@ with tab3:
             key=f"editor_{session_key}",
         )
         st.session_state[session_key] = edited_df
+        # Guardar solo cuando cambian los montos
+        _txt_nuevo = edited_df.to_json(orient="records")
+        if st.session_state.get(f"_esp_guardado_{session_key}") != _txt_nuevo:
+            almacen.guardar_esperados(esp_clave, _txt_nuevo)
+            st.session_state[f"_esp_guardado_{session_key}"] = _txt_nuevo
 
     with col_import:
         st.markdown("**O importa desde CSV/Excel**")
